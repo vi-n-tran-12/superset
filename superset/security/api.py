@@ -32,9 +32,13 @@ from superset.commands.dashboard.embedded.exceptions import (
     EmbeddedDashboardNotFoundError,
 )
 from superset.commands.exceptions import ForbiddenError
-from superset.exceptions import SupersetGenericErrorException
+from superset.exceptions import (
+    QueryClauseValidationException,
+    SupersetGenericErrorException,
+)
 from superset.extensions import db, event_logger
 from superset.security.guest_token import GuestTokenResourceType
+from superset.sql.parse import validate_guest_rls_clause
 from superset.views.base_api import (
     BaseSupersetApi,
     BaseSupersetModelRestApi,
@@ -185,7 +189,12 @@ class SecurityRestApi(BaseSupersetApi):
                     )
             # TODO: Add generic validation:
             # make sure username doesn't reference an existing user
-            # check rls rules for validity?
+            for rule in body["rls"]:
+                try:
+                    validate_guest_rls_clause(rule["clause"])
+                except QueryClauseValidationException as ex:
+                    raise ValidationError(message=str(ex)) from ex
+
             token = self.appbuilder.sm.create_guest_access_token(
                 body["user"], body["resources"], body["rls"]
             )

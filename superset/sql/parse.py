@@ -1564,6 +1564,46 @@ def sanitize_clause(clause: str, engine: str) -> str:
         raise QueryClauseValidationException(f"Invalid SQL clause: {clause}") from ex
 
 
+def validate_guest_rls_clause(clause: str, engine: str = "base") -> str:
+    """
+    Validate that a guest token RLS clause is a safe SQL predicate.
+
+    Applies ``sanitize_clause`` for structural validity, then rejects
+    clauses that contain UNION, sub-queries, or DDL/DML statements.
+
+    :param clause: The raw RLS clause string.
+    :param engine: The database engine dialect (defaults to ``"base"``).
+    :returns: The sanitized clause string.
+    :raises QueryClauseValidationException: If the clause is invalid or
+        contains disallowed SQL constructs.
+    """
+    sanitized = sanitize_clause(clause, engine)
+
+    try:
+        statement = SQLStatement(sanitized, engine)
+    except SupersetParseError as ex:
+        raise QueryClauseValidationException(f"Invalid RLS clause: {clause}") from ex
+
+    parsed = statement._parsed  # pylint: disable=protected-access
+
+    if parsed.find(exp.Union):
+        raise QueryClauseValidationException(
+            "RLS clause contains a UNION, which is not allowed"
+        )
+
+    if parsed.find(exp.Subquery) or parsed.find(exp.Select):
+        raise QueryClauseValidationException(
+            "RLS clause contains a sub-query, which is not allowed"
+        )
+
+    if statement.is_mutating():
+        raise QueryClauseValidationException(
+            "RLS clause contains DDL or DML, which is not allowed"
+        )
+
+    return sanitized
+
+
 def transpile_to_dialect(
     sql: str,
     target_engine: str,

@@ -40,6 +40,7 @@ from superset.sql.parse import (
     SQLStatement,
     Table,
     tokenize_kql,
+    validate_guest_rls_clause,
 )
 from tests.integration_tests.conftest import with_feature_flags
 
@@ -2725,6 +2726,48 @@ def test_sanitize_clause(sql: str, expected: str | Exception, engine: str) -> No
     else:
         with pytest.raises(expected):
             sanitize_clause(sql, engine)
+
+
+@pytest.mark.parametrize(
+    "clause,expected",
+    [
+        ("col = 1", "col = 1"),
+        ("col1 = 1 AND col2 = 'foo'", "col1 = 1 AND col2 = 'foo'"),
+        ("tenant_id = 42", "tenant_id = 42"),
+        (
+            "1=1 UNION SELECT username, password FROM ab_user--",
+            QueryClauseValidationException,
+        ),
+        (
+            "col IN (SELECT id FROM other_table)",
+            QueryClauseValidationException,
+        ),
+        (
+            "1=1; DROP TABLE ab_user",
+            QueryClauseValidationException,
+        ),
+        (
+            "1=1; DELETE FROM ab_user",
+            QueryClauseValidationException,
+        ),
+        (
+            "1=1; INSERT INTO ab_user VALUES (1)",
+            QueryClauseValidationException,
+        ),
+    ],
+)
+def test_validate_guest_rls_clause(
+    clause: str,
+    expected: str | type[Exception],
+) -> None:
+    """
+    Test ``validate_guest_rls_clause`` blocks dangerous SQL constructs.
+    """
+    if isinstance(expected, str):
+        assert validate_guest_rls_clause(clause) == expected
+    else:
+        with pytest.raises(expected):
+            validate_guest_rls_clause(clause)
 
 
 @pytest.mark.parametrize(
