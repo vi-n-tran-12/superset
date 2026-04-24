@@ -18,9 +18,11 @@
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy.exc import OperationalError
 
 from superset.app import AppRootMiddleware, create_app, SupersetApp
+from superset.constants import DEFAULT_GUEST_TOKEN_JWT_SECRET
 from superset.initialization import SupersetAppInitializer
 
 
@@ -257,3 +259,98 @@ class TestCreateAppRoot:
 
         assert isinstance(app.wsgi_app, AppRootMiddleware)
         assert app.wsgi_app.app_root == "/from-param"
+
+
+class TestCheckGuestTokenJwtSecret:
+    """Tests for GUEST_TOKEN_JWT_SECRET startup validation."""
+
+    def _make_initializer(
+        self,
+        embedded_enabled: bool = False,
+        jwt_secret: str = DEFAULT_GUEST_TOKEN_JWT_SECRET,
+        debug: bool = False,
+        testing: bool = False,
+    ) -> SupersetAppInitializer:
+        mock_app = MagicMock()
+        mock_app.debug = debug
+        mock_app.config = {
+            "FEATURE_FLAGS": {"EMBEDDED_SUPERSET": embedded_enabled},
+            "GUEST_TOKEN_JWT_SECRET": jwt_secret,
+            "TESTING": testing,
+        }
+        initializer = SupersetAppInitializer(mock_app)
+        return initializer
+
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_exits_when_embedded_enabled_and_default_secret(self, mock_is_test):
+        """Should sys.exit(1) when EMBEDDED_SUPERSET is enabled and the
+        default GUEST_TOKEN_JWT_SECRET is unchanged in production mode."""
+        initializer = self._make_initializer(embedded_enabled=True)
+
+        with pytest.raises(SystemExit) as exc_info:
+            initializer.check_guest_token_jwt_secret()
+
+        assert exc_info.value.code == 1
+
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_no_exit_when_embedded_disabled(self, mock_is_test):
+        """Should not exit when EMBEDDED_SUPERSET is disabled,
+        even with the default secret."""
+        initializer = self._make_initializer(embedded_enabled=False)
+        initializer.check_guest_token_jwt_secret()
+
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_no_exit_when_secret_is_changed(self, mock_is_test):
+        """Should not exit when GUEST_TOKEN_JWT_SECRET has been
+        changed from the default."""
+        initializer = self._make_initializer(
+            embedded_enabled=True,
+            jwt_secret="my-super-secure-secret-value",  # noqa: S106
+        )
+        initializer.check_guest_token_jwt_secret()
+
+    @patch("superset.initialization.logger")
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_warns_in_debug_mode(self, mock_is_test, mock_logger):
+        """Should warn but not exit when in debug mode with the
+        default secret and EMBEDDED_SUPERSET enabled."""
+        initializer = self._make_initializer(
+            embedded_enabled=True,
+            debug=True,
+        )
+        initializer.check_guest_token_jwt_secret()
+
+        mock_logger.warning.assert_called_once()
+        assert "GUEST_TOKEN_JWT_SECRET" in mock_logger.warning.call_args[0][0]
+
+    @patch("superset.initialization.logger")
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_warns_in_testing_mode(self, mock_is_test, mock_logger):
+        """Should warn but not exit when TESTING is True."""
+        initializer = self._make_initializer(
+            embedded_enabled=True,
+            testing=True,
+        )
+        initializer.check_guest_token_jwt_secret()
+
+        mock_logger.warning.assert_called_once()
+
+    @patch("superset.initialization.is_test", return_value=True)
+    def test_warns_when_is_test_returns_true(self, mock_is_test):
+        """Should not exit when is_test() returns True."""
+        initializer = self._make_initializer(embedded_enabled=True)
+        initializer.check_guest_token_jwt_secret()
+
+    @patch("superset.initialization.logger")
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_error_log_includes_guidance(self, mock_is_test, mock_logger):
+        """Error message should include actionable guidance for the operator."""
+        initializer = self._make_initializer(embedded_enabled=True)
+
+        with pytest.raises(SystemExit):
+            initializer.check_guest_token_jwt_secret()
+
+        mock_logger.error.assert_called_once()
+        error_msg = mock_logger.error.call_args[0][0]
+        assert "GUEST_TOKEN_JWT_SECRET" in error_msg
+        assert "openssl" in error_msg

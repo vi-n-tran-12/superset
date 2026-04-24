@@ -37,7 +37,7 @@ from flask_compress import Compress
 from flask_session import Session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from superset.constants import CHANGE_ME_SECRET_KEY
+from superset.constants import CHANGE_ME_SECRET_KEY, DEFAULT_GUEST_TOKEN_JWT_SECRET
 from superset.databases.utils import make_url_safe
 from superset.extensions import (
     _event_logger,
@@ -654,6 +654,34 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
             logger.error("Refusing to start due to insecure SECRET_KEY")
             sys.exit(1)
 
+    def check_guest_token_jwt_secret(self) -> None:
+        """Refuse to start when EMBEDDED_SUPERSET is enabled and
+        GUEST_TOKEN_JWT_SECRET still uses the default value."""
+        if (
+            self.config.get("FEATURE_FLAGS", {}).get("EMBEDDED_SUPERSET")
+            and self.config.get("GUEST_TOKEN_JWT_SECRET")
+            == DEFAULT_GUEST_TOKEN_JWT_SECRET
+        ):
+            if (
+                self.superset_app.debug
+                or self.superset_app.config["TESTING"]
+                or is_test()
+            ):
+                logger.warning(
+                    "Default GUEST_TOKEN_JWT_SECRET detected with "
+                    "EMBEDDED_SUPERSET enabled. Set a unique secret "
+                    "in superset_config.py for production."
+                )
+                return
+            logger.error(
+                "EMBEDDED_SUPERSET is enabled, but GUEST_TOKEN_JWT_SECRET "
+                "uses the default value. Anyone who knows the default secret "
+                "can forge guest tokens. Set a strong, unique "
+                "GUEST_TOKEN_JWT_SECRET in superset_config.py. "
+                "Example: openssl rand -base64 42"
+            )
+            sys.exit(1)
+
     def configure_session(self) -> None:
         if self.config["SESSION_SERVER_SIDE"]:
             Session(self.superset_app)
@@ -732,6 +760,7 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
         """
         self.pre_init()
         self.check_secret_key()
+        self.check_guest_token_jwt_secret()
         self.configure_session()
         # Configuration of logging must be done first to apply the formatter properly
         self.configure_logging()
