@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 from sqlalchemy.exc import OperationalError
 
 from superset.app import AppRootMiddleware, create_app, SupersetApp
+from superset.constants import DEFAULT_GUEST_TOKEN_JWT_SECRET
 from superset.initialization import SupersetAppInitializer
 
 
@@ -257,3 +258,70 @@ class TestCreateAppRoot:
 
         assert isinstance(app.wsgi_app, AppRootMiddleware)
         assert app.wsgi_app.app_root == "/from-param"
+
+
+class TestCheckGuestTokenSecret:
+    def _make_initializer(
+        self,
+        guest_secret: str = DEFAULT_GUEST_TOKEN_JWT_SECRET,
+        testing: bool = False,
+        debug: bool = False,
+    ) -> SupersetAppInitializer:
+        mock_app = MagicMock()
+        mock_app.config = {
+            "GUEST_TOKEN_JWT_SECRET": guest_secret,
+            "TESTING": testing,
+        }
+        mock_app.debug = debug
+        initializer = SupersetAppInitializer(mock_app)
+        return initializer
+
+    @patch("superset.initialization.sys.exit")
+    @patch("superset.is_feature_enabled", return_value=True)
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_exits_when_embedded_enabled_and_default_secret(
+        self, mock_is_test, mock_ff, mock_exit
+    ):
+        initializer = self._make_initializer()
+        initializer.check_guest_token_secret()
+        mock_exit.assert_called_once_with(1)
+
+    @patch("superset.initialization.sys.exit")
+    @patch("superset.is_feature_enabled", return_value=True)
+    def test_allows_custom_secret(self, mock_ff, mock_exit):
+        initializer = self._make_initializer(
+            guest_secret="my-strong-random-secret",  # noqa: S106
+        )
+        initializer.check_guest_token_secret()
+        mock_exit.assert_not_called()
+
+    @patch("superset.initialization.sys.exit")
+    @patch("superset.is_feature_enabled", return_value=False)
+    def test_allows_default_secret_when_embedded_disabled(self, mock_ff, mock_exit):
+        initializer = self._make_initializer()
+        initializer.check_guest_token_secret()
+        mock_exit.assert_not_called()
+
+    @patch("superset.initialization.sys.exit")
+    @patch("superset.is_feature_enabled", return_value=True)
+    @patch("superset.initialization.is_test", return_value=False)
+    @patch("superset.initialization.logger")
+    def test_warns_but_allows_in_debug_mode(
+        self, mock_logger, mock_is_test, mock_ff, mock_exit
+    ):
+        initializer = self._make_initializer(debug=True)
+        initializer.check_guest_token_secret()
+        mock_exit.assert_not_called()
+        mock_logger.warning.assert_called()
+
+    @patch("superset.initialization.sys.exit")
+    @patch("superset.is_feature_enabled", return_value=True)
+    @patch("superset.initialization.is_test", return_value=False)
+    @patch("superset.initialization.logger")
+    def test_warns_but_allows_in_testing_mode(
+        self, mock_logger, mock_is_test, mock_ff, mock_exit
+    ):
+        initializer = self._make_initializer(testing=True)
+        initializer.check_guest_token_secret()
+        mock_exit.assert_not_called()
+        mock_logger.warning.assert_called()
