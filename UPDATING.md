@@ -24,6 +24,22 @@ assists people when migrating to a new version.
 
 ## Next
 
+### SSRF Protection for Database Connections
+
+A new config option `BLOCKED_DB_HOST_RANGES` has been added. It is consulted
+by the database connection parameter validation endpoint
+(`/api/v1/database/validate_parameters/`) and by the SQLAlchemy URI safety
+check (`check_sqlalchemy_uri`) to reject database hosts that resolve to
+private, loopback, link-local (including cloud metadata endpoints such as
+`169.254.169.254`), or other non-routable IP addresses. This mitigates
+Server-Side Request Forgery (SSRF) attacks.
+
+By default the list blocks all private, loopback, link-local, multicast, and
+documentation/test ranges for both IPv4 and IPv6. Environments that need to
+connect to databases on internal networks should override
+`BLOCKED_DB_HOST_RANGES` in `superset_config.py` to narrow the blocklist, or
+set it to `[]` to disable the check entirely (not recommended).
+
 ### Granular Export Controls
 
 A new feature flag `GRANULAR_EXPORT_CONTROLS` introduces three fine-grained permissions that replace the legacy `can_csv` permission:

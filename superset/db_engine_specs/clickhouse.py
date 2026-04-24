@@ -42,7 +42,11 @@ from superset.db_engine_specs.exceptions import SupersetDBAPIDatabaseError
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
 from superset.extensions import cache_manager
 from superset.utils.core import GenericDataType
-from superset.utils.network import is_hostname_valid, is_port_open
+from superset.utils.network import (
+    is_address_blocked,
+    is_hostname_valid,
+    is_port_open,
+)
 
 if TYPE_CHECKING:
     from superset.models.core import Database
@@ -486,6 +490,16 @@ class ClickHouseConnectEngineSpec(BasicParametersMixin, ClickHouseEngineSpec):
                 SupersetError(
                     "The hostname provided can't be resolved.",
                     SupersetErrorType.CONNECTION_INVALID_HOSTNAME_ERROR,
+                    ErrorLevel.ERROR,
+                    {"invalid": ["host"]},
+                )
+            ]
+        if is_address_blocked(host):
+            return [
+                SupersetError(
+                    "The host is blocked from being used as a data "
+                    "source for security reasons.",
+                    SupersetErrorType.DATABASE_SECURITY_ACCESS_ERROR,
                     ErrorLevel.ERROR,
                     {"invalid": ["host"]},
                 )

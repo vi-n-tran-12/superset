@@ -1015,6 +1015,7 @@ class TestTestConnectionDatabaseCommand(SupersetTestCase):
         mock_event_logger.assert_called()
 
 
+@patch("superset.db_engine_specs.base.is_address_blocked")
 @patch("superset.db_engine_specs.base.is_hostname_valid")
 @patch("superset.db_engine_specs.base.is_port_open")
 @patch("superset.commands.database.validate.DatabaseDAO")
@@ -1022,6 +1023,7 @@ def test_validate(
     mock_database_dao,  # noqa: N803
     is_port_open,
     is_hostname_valid,
+    is_address_blocked,
     app_context,
 ) -> None:
     """
@@ -1029,6 +1031,7 @@ def test_validate(
     """
     is_hostname_valid.return_value = True
     is_port_open.return_value = True
+    is_address_blocked.return_value = False
 
     payload = {
         "engine": "postgresql",
@@ -1045,14 +1048,18 @@ def test_validate(
     command.run()
 
 
+@patch("superset.db_engine_specs.base.is_address_blocked")
 @patch("superset.db_engine_specs.base.is_hostname_valid")
 @patch("superset.db_engine_specs.base.is_port_open")
-def test_validate_partial(is_port_open, is_hostname_valid, app_context):
+def test_validate_partial(
+    is_port_open, is_hostname_valid, is_address_blocked, app_context
+):
     """
     Test parameter validation when only some parameters are present.
     """
     is_hostname_valid.return_value = True
     is_port_open.return_value = True
+    is_address_blocked.return_value = False
 
     payload = {
         "engine": "postgresql",

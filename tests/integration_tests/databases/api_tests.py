@@ -3796,6 +3796,7 @@ class TestDatabaseApi(SupersetTestCase):
             ]
         }
 
+    @mock.patch("superset.db_engine_specs.base.is_address_blocked")
     @mock.patch("superset.db_engine_specs.base.is_hostname_valid")
     @mock.patch("superset.db_engine_specs.base.is_port_open")
     @mock.patch("superset.databases.api.ValidateDatabaseParametersCommand")
@@ -3804,9 +3805,11 @@ class TestDatabaseApi(SupersetTestCase):
         ValidateDatabaseParametersCommand,  # noqa: N803
         is_port_open,
         is_hostname_valid,  # noqa: N803
+        is_address_blocked,  # noqa: N803
     ):
         is_hostname_valid.return_value = True
         is_port_open.return_value = True
+        is_address_blocked.return_value = False
 
         self.login(ADMIN_USERNAME)
         url = "api/v1/database/validate_parameters/"
@@ -3831,7 +3834,15 @@ class TestDatabaseApi(SupersetTestCase):
         assert rv.status_code == 200
         assert response == {"message": "OK"}
 
-    def test_validate_parameters_invalid_port(self):
+    @mock.patch("superset.db_engine_specs.base.is_address_blocked")
+    @mock.patch("superset.db_engine_specs.base.is_hostname_valid")
+    def test_validate_parameters_invalid_port(
+        self,
+        is_hostname_valid,  # noqa: N803
+        is_address_blocked,  # noqa: N803
+    ):
+        is_hostname_valid.return_value = True
+        is_address_blocked.return_value = False
         self.login(ADMIN_USERNAME)
         url = "api/v1/database/validate_parameters/"
         payload = {
@@ -3947,9 +3958,15 @@ class TestDatabaseApi(SupersetTestCase):
             ]
         }
 
+    @mock.patch("superset.db_engine_specs.base.is_address_blocked")
     @mock.patch("superset.db_engine_specs.base.is_hostname_valid")
-    def test_validate_parameters_invalid_port_range(self, is_hostname_valid):
+    def test_validate_parameters_invalid_port_range(
+        self,
+        is_hostname_valid,  # noqa: N803
+        is_address_blocked,  # noqa: N803
+    ):
         is_hostname_valid.return_value = True
+        is_address_blocked.return_value = False
 
         self.login(ADMIN_USERNAME)
         url = "api/v1/database/validate_parameters/"

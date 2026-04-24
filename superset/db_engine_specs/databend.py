@@ -41,7 +41,11 @@ from superset.db_engine_specs.exceptions import SupersetDBAPIDatabaseError
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
 from superset.utils.core import GenericDataType
 from superset.utils.hashing import hash_from_str
-from superset.utils.network import is_hostname_valid, is_port_open
+from superset.utils.network import (
+    is_address_blocked,
+    is_hostname_valid,
+    is_port_open,
+)
 
 if TYPE_CHECKING:
     from superset.models.core import Database
@@ -335,7 +339,7 @@ class DatabendConnectEngineSpec(BasicParametersMixin, DatabendEngineSpec):
         raise ValueError("Unrecognized Databend interface")
 
     @classmethod
-    def validate_parameters(
+    def validate_parameters(  # noqa: C901
         cls, properties: BasicPropertiesType
     ) -> list[SupersetError]:
         # The newest versions of superset send a "properties" object with a
@@ -357,6 +361,16 @@ class DatabendConnectEngineSpec(BasicParametersMixin, DatabendEngineSpec):
                 SupersetError(
                     "The hostname provided can't be resolved.",
                     SupersetErrorType.CONNECTION_INVALID_HOSTNAME_ERROR,
+                    ErrorLevel.ERROR,
+                    {"invalid": ["host"]},
+                )
+            ]
+        if is_address_blocked(host):
+            return [
+                SupersetError(
+                    "The host is blocked from being used as a data "
+                    "source for security reasons.",
+                    SupersetErrorType.DATABASE_SECURITY_ACCESS_ERROR,
                     ErrorLevel.ERROR,
                     {"invalid": ["host"]},
                 )

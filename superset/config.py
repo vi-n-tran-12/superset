@@ -62,6 +62,7 @@ from superset.utils import core as utils
 from superset.utils.encrypt import SQLAlchemyUtilsAdapter
 from superset.utils.log import DBEventLogger
 from superset.utils.logging_configurator import DefaultLoggingConfigurator
+from superset.utils.network import DEFAULT_BLOCKED_IP_RANGES
 from superset.utils.version import get_dev_env_label
 
 logger = logging.getLogger(__name__)
@@ -2272,6 +2273,20 @@ STATIC_ASSETS_PREFIX = ""
 # Some sqlalchemy connection strings can open Superset to security risks.
 # Typically these should not be allowed.
 PREVENT_UNSAFE_DB_CONNECTIONS = True
+
+# List of IP ranges (CIDR) that Superset will refuse to use as database hosts
+# in order to prevent Server-Side Request Forgery (SSRF) against internal
+# services. Hostnames are resolved and the resulting addresses are matched
+# against these ranges in both the parameter-validation endpoint and the
+# SQLAlchemy URI safety check performed on database create/update.
+#
+# The defaults cover private networks, loopback, link-local (including the
+# cloud metadata endpoints used by AWS/Azure/GCP), multicast, and other
+# non-routable ranges for both IPv4 and IPv6. Override this list to grant
+# access to internal databases when running Superset inside a trusted
+# network, or set it to ``[]`` to disable the check entirely (not
+# recommended).
+BLOCKED_DB_HOST_RANGES: list[str] = list(DEFAULT_BLOCKED_IP_RANGES)
 
 # If true all default urls on datasets will be handled as relative URLs by the frontend
 PREVENT_UNSAFE_DEFAULT_URLS_ON_DATASET = True

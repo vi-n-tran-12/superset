@@ -284,11 +284,13 @@ def test_get_time_grain_with_unknown_values():
     app.config = config
 
 
+@mock.patch("superset.db_engine_specs.base.is_address_blocked")
 @mock.patch("superset.db_engine_specs.base.is_hostname_valid")
 @mock.patch("superset.db_engine_specs.base.is_port_open")
-def test_validate(is_port_open, is_hostname_valid):
+def test_validate(is_port_open, is_hostname_valid, is_address_blocked):
     is_hostname_valid.return_value = True
     is_port_open.return_value = True
+    is_address_blocked.return_value = False
 
     properties = {
         "parameters": {
@@ -361,11 +363,15 @@ def test_validate_parameters_invalid_host(is_hostname_valid):
         ]
 
 
+@mock.patch("superset.db_engine_specs.base.is_address_blocked")
 @mock.patch("superset.db_engine_specs.base.is_hostname_valid")
 @mock.patch("superset.db_engine_specs.base.is_port_open")
-def test_validate_parameters_port_closed(is_port_open, is_hostname_valid):
+def test_validate_parameters_port_closed(
+    is_port_open, is_hostname_valid, is_address_blocked
+):
     is_hostname_valid.return_value = True
     is_port_open.return_value = False
+    is_address_blocked.return_value = False
 
     properties = {
         "parameters": {

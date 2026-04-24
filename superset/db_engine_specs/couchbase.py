@@ -35,7 +35,11 @@ from superset.db_engine_specs.base import (
     DatabaseCategory,
 )
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
-from superset.utils.network import is_hostname_valid, is_port_open
+from superset.utils.network import (
+    is_address_blocked,
+    is_hostname_valid,
+    is_port_open,
+)
 
 
 class BasicParametersType(TypedDict, total=False):
@@ -233,6 +237,19 @@ class CouchbaseEngineSpec(BasicParametersMixin, BaseEngineSpec):
                 SupersetError(
                     message="The hostname provided can't be resolved.",
                     error_type=SupersetErrorType.CONNECTION_INVALID_HOSTNAME_ERROR,
+                    level=ErrorLevel.ERROR,
+                    extra={"invalid": ["host"]},
+                ),
+            )
+            return errors
+        if is_address_blocked(host):
+            errors.append(
+                SupersetError(
+                    message=(
+                        "The host is blocked from being used as a data "
+                        "source for security reasons."
+                    ),
+                    error_type=SupersetErrorType.DATABASE_SECURITY_ACCESS_ERROR,
                     level=ErrorLevel.ERROR,
                     extra={"invalid": ["host"]},
                 ),

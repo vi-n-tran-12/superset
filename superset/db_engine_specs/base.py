@@ -87,7 +87,11 @@ from superset.utils import core as utils, json
 from superset.utils.core import ColumnSpec, GenericDataType, QuerySource
 from superset.utils.hashing import hash_from_str
 from superset.utils.json import redact_sensitive, reveal_sensitive
-from superset.utils.network import is_hostname_valid, is_port_open
+from superset.utils.network import (
+    is_address_blocked,
+    is_hostname_valid,
+    is_port_open,
+)
 from superset.utils.oauth2 import (
     encode_oauth2_state,
     generate_code_challenge,
@@ -2721,6 +2725,19 @@ class BasicParametersMixin:
                 SupersetError(
                     message="The hostname provided can't be resolved.",
                     error_type=SupersetErrorType.CONNECTION_INVALID_HOSTNAME_ERROR,
+                    level=ErrorLevel.ERROR,
+                    extra={"invalid": ["host"]},
+                ),
+            )
+            return errors
+        if is_address_blocked(host):
+            errors.append(
+                SupersetError(
+                    message=(
+                        "The host is blocked from being used as a data "
+                        "source for security reasons."
+                    ),
+                    error_type=SupersetErrorType.DATABASE_SECURITY_ACCESS_ERROR,
                     level=ErrorLevel.ERROR,
                     extra={"invalid": ["host"]},
                 ),

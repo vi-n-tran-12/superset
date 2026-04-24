@@ -40,7 +40,11 @@ from superset.db_engine_specs.hive import HiveEngineSpec
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
 from superset.utils import json
 from superset.utils.core import get_user_agent, QuerySource
-from superset.utils.network import is_hostname_valid, is_port_open
+from superset.utils.network import (
+    is_address_blocked,
+    is_hostname_valid,
+    is_port_open,
+)
 
 if TYPE_CHECKING:
     from superset.models.core import Database
@@ -359,7 +363,7 @@ class DatabricksDynamicBaseEngineSpec(BasicParametersMixin, DatabricksBaseEngine
         ]
 
     @classmethod
-    def validate_parameters(  # type: ignore
+    def validate_parameters(  # type: ignore  # noqa: C901
         cls,
         properties: Union[
             DatabricksNativePropertiesType,
@@ -398,6 +402,19 @@ class DatabricksDynamicBaseEngineSpec(BasicParametersMixin, DatabricksBaseEngine
                 SupersetError(
                     message="The hostname provided can't be resolved.",
                     error_type=SupersetErrorType.CONNECTION_INVALID_HOSTNAME_ERROR,
+                    level=ErrorLevel.ERROR,
+                    extra={"invalid": ["host"]},
+                ),
+            )
+            return errors
+        if is_address_blocked(host):  # type: ignore
+            errors.append(
+                SupersetError(
+                    message=(
+                        "The host is blocked from being used as a data "
+                        "source for security reasons."
+                    ),
+                    error_type=SupersetErrorType.DATABASE_SECURITY_ACCESS_ERROR,
                     level=ErrorLevel.ERROR,
                     extra={"invalid": ["host"]},
                 ),

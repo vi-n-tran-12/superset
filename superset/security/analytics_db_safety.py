@@ -23,6 +23,7 @@ from sqlalchemy.exc import NoSuchModuleError
 from superset import feature_flag_manager
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
 from superset.exceptions import SupersetSecurityException
+from superset.utils.network import is_address_blocked
 
 # list of unsafe SQLAlchemy dialects
 BLOCKLIST = {
@@ -52,6 +53,20 @@ def check_sqlalchemy_uri(uri: URL) -> None:
                 message=_(
                     "%(dialect)s cannot be used as a data source for security reasons.",
                     dialect=dialect,
+                ),
+                level=ErrorLevel.ERROR,
+            )
+        )
+
+    host = uri.host
+    if host and is_address_blocked(host):
+        raise SupersetSecurityException(
+            SupersetError(
+                error_type=SupersetErrorType.DATABASE_SECURITY_ACCESS_ERROR,
+                message=_(
+                    "Host %(host)s is blocked from being used as a data "
+                    "source for security reasons.",
+                    host=host,
                 ),
                 level=ErrorLevel.ERROR,
             )
