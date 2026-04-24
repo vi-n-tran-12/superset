@@ -24,6 +24,7 @@ import re
 from datetime import timedelta
 from textwrap import dedent
 from typing import Any
+from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -1283,3 +1284,58 @@ def test_start_oauth2_dance_falls_back_to_url_for(mocker: MockerFixture) -> None
     error = exc_info.value.error
 
     assert error.extra["redirect_uri"] == fallback_uri
+
+
+@mock.patch("superset.db_engine_specs.base.is_hostname_valid", return_value=True)
+@mock.patch("superset.db_engine_specs.base.is_host_safe", return_value=False)
+def test_validate_parameters_blocked_host(
+    mock_is_host_safe: mock.MagicMock,
+    mock_is_hostname_valid: mock.MagicMock,
+    app_context: None,
+) -> None:
+    from superset.db_engine_specs.base import (
+        BasicParametersMixin,
+        BasicPropertiesType,
+    )
+
+    properties: BasicPropertiesType = {
+        "parameters": {
+            "host": "169.254.169.254",
+            "port": 80,
+            "username": "user",
+            "password": "pass",
+            "database": "mydb",
+            "encryption": False,
+        }
+    }
+    errors = BasicParametersMixin.validate_parameters(properties)
+    assert len(errors) == 1
+    assert errors[0].error_type == SupersetErrorType.CONNECTION_BLOCKED_HOST_ERROR
+
+
+@mock.patch("superset.db_engine_specs.base.is_hostname_valid", return_value=True)
+@mock.patch("superset.db_engine_specs.base.is_host_safe", return_value=True)
+@mock.patch("superset.db_engine_specs.base.is_port_open", return_value=True)
+def test_validate_parameters_allowed_host(
+    mock_is_port_open: mock.MagicMock,
+    mock_is_host_safe: mock.MagicMock,
+    mock_is_hostname_valid: mock.MagicMock,
+    app_context: None,
+) -> None:
+    from superset.db_engine_specs.base import (
+        BasicParametersMixin,
+        BasicPropertiesType,
+    )
+
+    properties: BasicPropertiesType = {
+        "parameters": {
+            "host": "db.example.com",
+            "port": 5432,
+            "username": "user",
+            "password": "pass",
+            "database": "mydb",
+            "encryption": False,
+        }
+    }
+    errors = BasicParametersMixin.validate_parameters(properties)
+    assert errors == []
