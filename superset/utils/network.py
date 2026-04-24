@@ -14,12 +14,63 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import ipaddress
 import platform
 import socket
 import subprocess
+from ipaddress import IPv4Network, IPv6Network
+
+from flask import current_app
 
 PORT_TIMEOUT = 5
 PING_TIMEOUT = 5
+
+DEFAULT_BLOCKED_HOST_RANGES: list[IPv4Network | IPv6Network] = [
+    IPv4Network("10.0.0.0/8"),
+    IPv4Network("172.16.0.0/12"),
+    IPv4Network("192.168.0.0/16"),
+    IPv4Network("127.0.0.0/8"),
+    IPv4Network("169.254.0.0/16"),
+    IPv4Network("0.0.0.0/8"),
+    IPv6Network("::1/128"),
+    IPv6Network("fc00::/7"),
+    IPv6Network("fe80::/10"),
+    IPv6Network("::/128"),
+]
+
+
+def is_blocked_ip(ip_str: str) -> bool:
+    """Check if an IP address falls within blocked network ranges."""
+    try:
+        addr = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True
+
+    blocked_ranges: list[IPv4Network | IPv6Network] = (
+        current_app.config.get("BLOCKED_DB_HOST_RANGES") or DEFAULT_BLOCKED_HOST_RANGES
+    )
+    return any(addr in network for network in blocked_ranges)
+
+
+def resolve_host_to_ips(host: str) -> list[str]:
+    """Resolve a hostname to a list of IP address strings."""
+    try:
+        results = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return []
+    return list({str(result[4][0]) for result in results})
+
+
+def is_host_safe(host: str) -> bool:
+    """
+    Check that a hostname does not resolve to any blocked IP ranges.
+
+    Returns True if the host is safe to connect to.
+    """
+    ips = resolve_host_to_ips(host)
+    if not ips:
+        return True
+    return not any(is_blocked_ip(ip) for ip in ips)
 
 
 def is_port_open(host: str, port: int) -> bool:

@@ -2273,6 +2273,15 @@ STATIC_ASSETS_PREFIX = ""
 # Typically these should not be allowed.
 PREVENT_UNSAFE_DB_CONNECTIONS = True
 
+# IP ranges that are blocked for database connections to prevent SSRF attacks.
+# By default, private (RFC 1918), loopback, link-local, and other non-routable
+# ranges are blocked. Set to an empty list to disable this check.
+# Each entry should be an ipaddress.IPv4Network or IPv6Network object.
+# Example override in superset_config.py:
+#   from ipaddress import IPv4Network
+#   BLOCKED_DB_HOST_RANGES = [IPv4Network("169.254.0.0/16")]
+BLOCKED_DB_HOST_RANGES: list = []  # empty = use DEFAULT_BLOCKED_HOST_RANGES from utils
+
 # If true all default urls on datasets will be handled as relative URLs by the frontend
 PREVENT_UNSAFE_DEFAULT_URLS_ON_DATASET = True
 

@@ -49,6 +49,7 @@ class SupersetErrorType(StrEnum):
     CONNECTION_UNKNOWN_DATABASE_ERROR = "CONNECTION_UNKNOWN_DATABASE_ERROR"
     CONNECTION_DATABASE_PERMISSIONS_ERROR = "CONNECTION_DATABASE_PERMISSIONS_ERROR"
     CONNECTION_MISSING_PARAMETERS_ERROR = "CONNECTION_MISSING_PARAMETERS_ERROR"
+    CONNECTION_BLOCKED_HOST_ERROR = "CONNECTION_BLOCKED_HOST_ERROR"
     OBJECT_DOES_NOT_EXIST_ERROR = "OBJECT_DOES_NOT_EXIST_ERROR"
     SYNTAX_ERROR = "SYNTAX_ERROR"
     CONNECTION_DATABASE_TIMEOUT = "CONNECTION_DATABASE_TIMEOUT"
@@ -153,6 +154,10 @@ ISSUE_CODES = {
     1037: _("Custom SQL fields cannot contain sub-queries."),
     1040: _("The submitted payload failed validation."),
     1041: _("The result size exceeds the allowed limit."),
+    1042: _(
+        "The host is not allowed. Connections to private, loopback, "
+        "or link-local addresses are blocked."
+    ),
 }
 
 
@@ -193,6 +198,7 @@ ERROR_TYPES_TO_ISSUE_CODES_MAPPING = {
     SupersetErrorType.CONNECTION_DATABASE_TIMEOUT: [1001, 1009],
     SupersetErrorType.MARSHMALLOW_ERROR: [1040],
     SupersetErrorType.RESULT_TOO_LARGE_ERROR: [1041],
+    SupersetErrorType.CONNECTION_BLOCKED_HOST_ERROR: [1042],
 }
 
 
