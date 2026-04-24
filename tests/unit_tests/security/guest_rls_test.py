@@ -27,11 +27,13 @@ from __future__ import annotations
 from typing import Callable
 from unittest.mock import MagicMock, patch
 
+import pytest
 from flask import Flask
 from pytest_mock import MockerFixture
 from sqlalchemy.sql.elements import TextClause
 
 from superset.connectors.sqla.models import BaseDatasource
+from superset.exceptions import QueryObjectValidationError
 from superset.security.guest_token import (
     GuestToken,
     GuestTokenResourceType,
@@ -192,8 +194,8 @@ def _make_datasource_with_real_rls(dataset_id: int) -> MagicMock:
     datasource = _make_datasource(dataset_id)
     # Bind real BaseDatasource method so RLS logic executes against mocked
     # security_manager rather than returning MagicMock auto-stub
-    datasource.get_sqla_row_level_filters = (
-        lambda **kwargs: BaseDatasource.get_sqla_row_level_filters(datasource, **kwargs)
+    datasource.get_sqla_row_level_filters = lambda **kwargs: (
+        BaseDatasource.get_sqla_row_level_filters(datasource, **kwargs)
     )
     return datasource
 
@@ -296,3 +298,78 @@ def test_global_guest_rule_excluded_through_get_predicates_for_table(
             f"get_predicates_for_table() to prevent double application "
             f"in virtual datasets. Got: {predicates}"
         )
+
+
+@pytest.mark.parametrize(
+    "malicious_clause",
+    [
+        "1=1 UNION SELECT username, password, email FROM ab_user",
+        "1=1; DROP TABLE ab_user",
+        "team_id IN (SELECT id FROM ab_user)",
+        "DROP TABLE foo",
+        "1=1) UNION SELECT * FROM ab_user--",
+    ],
+)
+def test_malicious_guest_rls_clause_rejected_at_query_time(
+    app: Flask,
+    malicious_clause: str,
+) -> None:
+    """
+    Defense-in-depth: even if a guest token somehow carries a malicious RLS
+    clause (e.g. forged token, token issued before the API-level validation
+    was added), the clause is rejected when building the SQL filters for a
+    query.
+    """
+    dataset_id = 42
+    rule = GuestTokenRlsRule(dataset=str(dataset_id), clause=malicious_clause)
+    guest_user = _make_guest_user(rules=[rule])
+
+    datasource = _make_datasource(dataset_id)
+
+    with (
+        patch(
+            "superset.connectors.sqla.models.security_manager.get_rls_filters",
+            return_value=[],
+        ),
+        patch(
+            "superset.connectors.sqla.models.security_manager.get_guest_rls_filters",
+            wraps=_guest_rls_filter(guest_user),
+        ),
+        patch(
+            "superset.connectors.sqla.models.is_feature_enabled",
+            return_value=True,
+        ),
+        pytest.raises(QueryObjectValidationError),
+    ):
+        BaseDatasource.get_sqla_row_level_filters(datasource)
+
+
+def test_benign_guest_rls_clause_still_accepted_at_query_time(
+    app: Flask,
+) -> None:
+    """
+    A benign guest RLS clause (a simple boolean expression) is not blocked
+    by the defense-in-depth validation.
+    """
+    dataset_id = 42
+    rule = GuestTokenRlsRule(dataset=str(dataset_id), clause="tenant_id = 5")
+    guest_user = _make_guest_user(rules=[rule])
+
+    datasource = _make_datasource(dataset_id)
+
+    with (
+        patch(
+            "superset.connectors.sqla.models.security_manager.get_rls_filters",
+            return_value=[],
+        ),
+        patch(
+            "superset.connectors.sqla.models.security_manager.get_guest_rls_filters",
+            wraps=_guest_rls_filter(guest_user),
+        ),
+        patch(
+            "superset.connectors.sqla.models.is_feature_enabled",
+            return_value=True,
+        ),
+    ):
+        filters = BaseDatasource.get_sqla_row_level_filters(datasource)
+        assert any("tenant_id" in str(f) for f in filters)

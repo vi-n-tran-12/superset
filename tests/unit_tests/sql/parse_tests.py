@@ -40,6 +40,7 @@ from superset.sql.parse import (
     SQLStatement,
     Table,
     tokenize_kql,
+    validate_rls_clause,
 )
 from tests.integration_tests.conftest import with_feature_flags
 
@@ -2725,6 +2726,64 @@ def test_sanitize_clause(sql: str, expected: str | Exception, engine: str) -> No
     else:
         with pytest.raises(expected):
             sanitize_clause(sql, engine)
+
+
+@pytest.mark.parametrize(
+    "clause",
+    [
+        "team_id = 5",
+        "1=1",
+        "user_id = 5 AND status = 'active'",
+        "team_id IN (1, 2, 3)",
+        "created_at > '2024-01-01'",
+        "LOWER(name) = 'foo'",
+    ],
+)
+def test_validate_rls_clause_valid(clause: str) -> None:
+    """
+    Simple boolean RLS clauses are accepted by `validate_rls_clause`.
+    """
+    # the return value is the re-generated SQL and should be a non-empty string
+    assert validate_rls_clause(clause)
+
+
+@pytest.mark.parametrize(
+    "clause",
+    [
+        # multi-statement injection (the core of the reported vulnerability)
+        "1=1; DROP TABLE ab_user",
+        "TRUE; SELECT 1",
+        # UNION-based data exfiltration
+        "1=1 UNION SELECT username FROM ab_user",
+        "1=1 UNION SELECT username, password, email FROM ab_user--",
+        # subqueries leak data from other tables
+        "team_id IN (SELECT id FROM ab_user)",
+        "EXISTS (SELECT 1 FROM ab_user)",
+        # DDL / DML statements
+        "DROP TABLE foo",
+        "INSERT INTO foo VALUES (1)",
+        "UPDATE foo SET bar = 1",
+        "DELETE FROM foo",
+        # clauses that do not parse as a single balanced expression
+        "1=1) UNION SELECT * FROM ab_user--",
+        "col1 = 1) AND (col2 = 2",
+    ],
+)
+def test_validate_rls_clause_invalid(clause: str) -> None:
+    """
+    Dangerous RLS clauses are rejected by `validate_rls_clause`.
+    """
+    with pytest.raises(QueryClauseValidationException):
+        validate_rls_clause(clause)
+
+
+def test_validate_rls_clause_unknown_engine() -> None:
+    """
+    An unknown engine name falls back to the generic dialect instead of
+    raising (useful at guest-token creation time, where the engine is not
+    yet known).
+    """
+    assert validate_rls_clause("team_id = 5", "some_unknown_engine")
 
 
 @pytest.mark.parametrize(

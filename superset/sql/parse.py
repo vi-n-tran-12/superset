@@ -1564,6 +1564,76 @@ def sanitize_clause(clause: str, engine: str) -> str:
         raise QueryClauseValidationException(f"Invalid SQL clause: {clause}") from ex
 
 
+def validate_rls_clause(clause: str, engine: str = "base") -> str:
+    """
+    Strictly validate a Row-Level Security clause.
+
+    RLS clauses are injected as raw text into the ``WHERE`` of the queries that
+    Superset runs against a datasource's underlying database. To prevent SQL
+    injection via crafted clauses (for example from forged or overly
+    permissive guest tokens), only a single boolean expression is allowed.
+
+    The following constructs are rejected:
+      * multiple statements (e.g. ``1=1; DROP TABLE users``)
+      * DDL / DML statements (``INSERT``, ``UPDATE``, ``DELETE``, ``DROP``,
+        ``CREATE``, ``ALTER``, ``MERGE``, ``TRUNCATE``)
+      * set operations (``UNION``, ``INTERSECT``, ``EXCEPT``)
+      * subqueries (nested ``SELECT``)
+      * statements parsed as a raw command (anything sqlglot cannot fully parse
+        as an expression)
+
+    :param clause: the RLS clause to validate
+    :param engine: the database engine (used for dialect-aware parsing); when
+        unknown (for example at guest-token creation time) the generic
+        ``"base"`` dialect is used
+    :return: the re-generated, validated clause
+    :raises QueryClauseValidationException: when the clause is invalid
+    """
+    try:
+        script = SQLScript(clause, engine)
+    except SupersetParseError as ex:
+        raise QueryClauseValidationException(f"Invalid SQL clause: {clause}") from ex
+
+    if len(script.statements) != 1:
+        raise QueryClauseValidationException(
+            f"RLS clause must contain a single SQL expression: {clause}"
+        )
+
+    statement = script.statements[0]
+    parsed = statement._parsed  # pylint: disable=protected-access
+
+    if not isinstance(parsed, exp.Expression) or isinstance(parsed, exp.Command):
+        raise QueryClauseValidationException(f"Invalid SQL clause: {clause}")
+
+    if statement.is_mutating():
+        raise QueryClauseValidationException(
+            f"RLS clause must not contain DDL or DML: {clause}"
+        )
+
+    disallowed_nodes: tuple[type[exp.Expression], ...] = (
+        exp.Select,
+        exp.Subquery,
+        exp.Union,
+        exp.Intersect,
+        exp.Except,
+    )
+    for node_type in disallowed_nodes:
+        if parsed.find(node_type):
+            raise QueryClauseValidationException(
+                f"RLS clause must not contain subqueries or set operations: {clause}"
+            )
+
+    dialect = SQLGLOT_DIALECTS.get(engine)
+    from sqlglot.dialects.dialect import Dialect
+
+    return Dialect.get_or_raise(dialect).generate(
+        parsed,
+        copy=True,
+        comments=True,
+        pretty=False,
+    )
+
+
 def transpile_to_dialect(
     sql: str,
     target_engine: str,

@@ -81,6 +81,7 @@ from superset.db_engine_specs.base import BaseEngineSpec, TimestampExpression
 from superset.exceptions import (
     ColumnNotFoundException,
     DatasetInvalidPermissionEvaluationException,
+    QueryClauseValidationException,
     QueryObjectValidationError,
     SupersetGenericDBErrorException,
     SupersetSecurityException,
@@ -104,7 +105,7 @@ from superset.models.helpers import (
 )
 from superset.models.slice import Slice
 from superset.models.sql_types.base import CurrencyType
-from superset.sql.parse import Table
+from superset.sql.parse import Table, validate_rls_clause
 from superset.superset_typing import (
     AdhocColumn,
     AdhocMetric,
@@ -769,9 +770,20 @@ class BaseDatasource(
                     all_filters.append(clause)
 
             if is_feature_enabled("EMBEDDED_SUPERSET"):
+                engine = getattr(
+                    getattr(self, "database", None), "db_engine_spec", None
+                )
+                engine_name = engine.engine if engine is not None else "base"
                 for rule in security_manager.get_guest_rls_filters(self):
                     if not include_global_guest_rls and not rule.get("dataset"):
                         continue
+                    # Defense-in-depth: re-validate the RLS clause at query
+                    # execution time to reject clauses that would enable SQL
+                    # injection (e.g. multi-statement, UNION, subqueries, DDL
+                    # or DML). Validation also happens at guest-token creation
+                    # time; this catches tokens that predate the validation or
+                    # were obtained outside the standard token endpoint.
+                    validate_rls_clause(rule["clause"], engine_name)
                     clause = self.text(
                         f"({template_processor.process_template(rule['clause'])})"
                     )
@@ -780,6 +792,13 @@ class BaseDatasource(
             grouped_filters = [or_(*clauses) for clauses in filter_groups.values()]
             all_filters.extend(grouped_filters)
             return all_filters
+        except QueryClauseValidationException as ex:
+            raise QueryObjectValidationError(
+                _(
+                    "Invalid RLS filter: %(msg)s",
+                    msg=ex.message,
+                )
+            ) from ex
         except (TemplateError, SupersetSyntaxErrorException) as ex:
             msg = getattr(ex, "message", str(ex))
             raise QueryObjectValidationError(
