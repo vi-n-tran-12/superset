@@ -37,7 +37,7 @@ from flask_compress import Compress
 from flask_session import Session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from superset.constants import CHANGE_ME_SECRET_KEY
+from superset.constants import CHANGE_ME_GUEST_TOKEN_SECRET, CHANGE_ME_SECRET_KEY
 from superset.databases.utils import make_url_safe
 from superset.extensions import (
     _event_logger,
@@ -654,6 +654,34 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
             logger.error("Refusing to start due to insecure SECRET_KEY")
             sys.exit(1)
 
+    def check_guest_token_secret(self) -> None:
+        """Refuse to start when EMBEDDED_SUPERSET is enabled and the
+        GUEST_TOKEN_JWT_SECRET still has its default value."""
+        if not feature_flag_manager.is_feature_enabled("EMBEDDED_SUPERSET"):
+            return
+
+        default_secret = (
+            self.config.get("GUEST_TOKEN_JWT_SECRET") == CHANGE_ME_GUEST_TOKEN_SECRET
+        )
+
+        if not default_secret:
+            return
+
+        if self.superset_app.debug or self.superset_app.config["TESTING"] or is_test():
+            logger.warning(
+                "Default GUEST_TOKEN_JWT_SECRET detected with EMBEDDED_SUPERSET "
+                "enabled. Set a unique secret in superset_config.py."
+            )
+            return
+
+        logger.error(
+            "EMBEDDED_SUPERSET is enabled, but GUEST_TOKEN_JWT_SECRET uses the "
+            "default value. Anyone who knows the default can forge guest tokens. "
+            "Set GUEST_TOKEN_JWT_SECRET to a strong random string in "
+            "superset_config.py, e.g.: openssl rand -base64 42"
+        )
+        sys.exit(1)
+
     def configure_session(self) -> None:
         if self.config["SESSION_SERVER_SIDE"]:
             Session(self.superset_app)
@@ -738,6 +766,7 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
         # Configuration of feature_flags must be done first to allow init features
         # conditionally
         self.configure_feature_flags()
+        self.check_guest_token_secret()
         self.configure_db_encrypt()
         self.setup_db()
 

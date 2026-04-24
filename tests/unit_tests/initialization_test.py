@@ -18,9 +18,11 @@
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy.exc import OperationalError
 
 from superset.app import AppRootMiddleware, create_app, SupersetApp
+from superset.constants import CHANGE_ME_GUEST_TOKEN_SECRET
 from superset.initialization import SupersetAppInitializer
 
 
@@ -257,3 +259,76 @@ class TestCreateAppRoot:
 
         assert isinstance(app.wsgi_app, AppRootMiddleware)
         assert app.wsgi_app.app_root == "/from-param"
+
+
+class TestCheckGuestTokenSecret:
+    """Tests for the GUEST_TOKEN_JWT_SECRET startup validation."""
+
+    def _make_initializer(
+        self,
+        guest_secret: str = CHANGE_ME_GUEST_TOKEN_SECRET,
+        debug: bool = False,
+        testing: bool = False,
+    ) -> SupersetAppInitializer:
+        mock_app = MagicMock()
+        mock_app.debug = debug
+        mock_app.config = {
+            "GUEST_TOKEN_JWT_SECRET": guest_secret,
+            "TESTING": testing,
+        }
+        initializer = SupersetAppInitializer(mock_app)
+        return initializer
+
+    @patch("superset.initialization.feature_flag_manager")
+    def test_exits_when_embedded_enabled_and_default_secret(self, mock_ff: MagicMock):
+        """Startup must abort when EMBEDDED_SUPERSET is on and the secret is default."""
+        mock_ff.is_feature_enabled.return_value = True
+        initializer = self._make_initializer()
+
+        with pytest.raises(SystemExit):
+            initializer.check_guest_token_secret()
+
+    @patch("superset.initialization.feature_flag_manager")
+    def test_no_exit_when_embedded_disabled(self, mock_ff: MagicMock):
+        """No exit when EMBEDDED_SUPERSET is disabled, even with default secret."""
+        mock_ff.is_feature_enabled.return_value = False
+        initializer = self._make_initializer()
+
+        initializer.check_guest_token_secret()  # should not raise
+
+    @patch("superset.initialization.feature_flag_manager")
+    def test_no_exit_when_secret_changed(self, mock_ff: MagicMock):
+        """No exit when the secret has been changed from the default."""
+        mock_ff.is_feature_enabled.return_value = True
+        initializer = self._make_initializer(
+            guest_secret="my-custom-strong-secret-value"  # noqa: S106
+        )
+
+        initializer.check_guest_token_secret()  # should not raise
+
+    @patch("superset.initialization.feature_flag_manager")
+    def test_warns_but_allows_in_test_mode(self, mock_ff: MagicMock):
+        """In test mode, log a warning but do not exit."""
+        mock_ff.is_feature_enabled.return_value = True
+        initializer = self._make_initializer()
+
+        with patch("superset.initialization.is_test", return_value=True):
+            initializer.check_guest_token_secret()  # should not raise
+
+    @patch("superset.initialization.feature_flag_manager")
+    def test_warns_but_allows_in_debug_mode(self, mock_ff: MagicMock):
+        """In debug mode, log a warning but do not exit."""
+        mock_ff.is_feature_enabled.return_value = True
+        initializer = self._make_initializer(debug=True)
+
+        with patch("superset.initialization.is_test", return_value=False):
+            initializer.check_guest_token_secret()  # should not raise
+
+    @patch("superset.initialization.feature_flag_manager")
+    def test_warns_but_allows_in_testing_config(self, mock_ff: MagicMock):
+        """With TESTING=True config, log a warning but do not exit."""
+        mock_ff.is_feature_enabled.return_value = True
+        initializer = self._make_initializer(testing=True)
+
+        with patch("superset.initialization.is_test", return_value=False):
+            initializer.check_guest_token_secret()  # should not raise
