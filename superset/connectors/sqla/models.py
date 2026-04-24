@@ -81,6 +81,7 @@ from superset.db_engine_specs.base import BaseEngineSpec, TimestampExpression
 from superset.exceptions import (
     ColumnNotFoundException,
     DatasetInvalidPermissionEvaluationException,
+    QueryClauseValidationException,
     QueryObjectValidationError,
     SupersetGenericDBErrorException,
     SupersetSecurityException,
@@ -104,7 +105,7 @@ from superset.models.helpers import (
 )
 from superset.models.slice import Slice
 from superset.models.sql_types.base import CurrencyType
-from superset.sql.parse import Table
+from superset.sql.parse import Table, validate_rls_clause
 from superset.superset_typing import (
     AdhocColumn,
     AdhocMetric,
@@ -772,9 +773,21 @@ class BaseDatasource(
                 for rule in security_manager.get_guest_rls_filters(self):
                     if not include_global_guest_rls and not rule.get("dataset"):
                         continue
-                    clause = self.text(
-                        f"({template_processor.process_template(rule['clause'])})"
-                    )
+                    raw_clause = template_processor.process_template(rule["clause"])
+                    try:
+                        engine = self.database.db_engine_spec.engine
+                    except AttributeError:
+                        engine = "base"
+                    try:
+                        sanitized = validate_rls_clause(raw_clause, engine)
+                    except QueryClauseValidationException as ex:
+                        raise QueryObjectValidationError(
+                            _(
+                                "Invalid RLS clause in guest token: %(msg)s",
+                                msg=str(ex),
+                            )
+                        ) from ex
+                    clause = self.text(f"({sanitized})")
                     all_filters.append(clause)
 
             grouped_filters = [or_(*clauses) for clauses in filter_groups.values()]
@@ -1350,7 +1363,7 @@ class SqlaTable(
         name = escape(self.name)
         url = escape(self.explore_url)
         anchor = f'<a target="_blank" href="{url}">{name}</a>'
-        return Markup(anchor)
+        return Markup(anchor)  # noqa: S704
 
     def get_catalog_perm(self) -> str | None:
         """Returns catalog permission if present, database one otherwise."""

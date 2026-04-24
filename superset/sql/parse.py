@@ -1564,6 +1564,48 @@ def sanitize_clause(clause: str, engine: str) -> str:
         raise QueryClauseValidationException(f"Invalid SQL clause: {clause}") from ex
 
 
+# SQL AST node types forbidden in RLS clauses.
+_FORBIDDEN_RLS_NODE_TYPES: tuple[type[exp.Expression], ...] = (
+    exp.Union,
+    exp.Select,
+    exp.Subquery,
+    exp.Insert,
+    exp.Update,
+    exp.Delete,
+    exp.Drop,
+    exp.Create,
+    exp.Alter,
+    exp.Command,
+)
+
+
+def validate_rls_clause(clause: str, engine: str = "base") -> str:
+    """
+    Validate and sanitize an RLS clause for use in guest tokens.
+
+    Performs structural validation via ``sanitize_clause`` and additionally
+    rejects clauses containing UNION, sub-queries, or DDL/DML statements.
+    Returns the sanitized clause string on success.
+
+    :param clause: The raw RLS WHERE-clause fragment.
+    :param engine: The database engine name (for dialect-aware parsing).
+    :returns: The sanitized clause.
+    :raises QueryClauseValidationException: If the clause is invalid or
+        contains forbidden SQL constructs.
+    """
+    sanitized = sanitize_clause(clause, engine)
+    try:
+        parsed = sqlglot.parse_one(clause)
+    except sqlglot.errors.ParseError as ex:
+        raise QueryClauseValidationException(f"Invalid SQL clause: {clause}") from ex
+    for node in parsed.walk():
+        if isinstance(node, _FORBIDDEN_RLS_NODE_TYPES):
+            raise QueryClauseValidationException(
+                f"RLS clause contains forbidden SQL: {type(node).__name__}"
+            )
+    return sanitized
+
+
 def transpile_to_dialect(
     sql: str,
     target_engine: str,

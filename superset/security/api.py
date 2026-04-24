@@ -24,7 +24,7 @@ from flask_appbuilder.api.schemas import get_list_schema
 from flask_appbuilder.security.decorators import permission_name, protect
 from flask_appbuilder.security.sqla.models import RegisterUser, Role
 from flask_wtf.csrf import generate_csrf
-from marshmallow import EXCLUDE, fields, post_load, Schema, ValidationError
+from marshmallow import EXCLUDE, fields, post_load, Schema, validates, ValidationError
 from sqlalchemy import asc, desc
 from sqlalchemy.orm import selectinload
 
@@ -32,9 +32,13 @@ from superset.commands.dashboard.embedded.exceptions import (
     EmbeddedDashboardNotFoundError,
 )
 from superset.commands.exceptions import ForbiddenError
-from superset.exceptions import SupersetGenericErrorException
+from superset.exceptions import (
+    QueryClauseValidationException,
+    SupersetGenericErrorException,
+)
 from superset.extensions import db, event_logger
 from superset.security.guest_token import GuestTokenResourceType
+from superset.sql.parse import validate_rls_clause
 from superset.views.base_api import (
     BaseSupersetApi,
     BaseSupersetModelRestApi,
@@ -76,7 +80,15 @@ class ResourceSchema(PermissiveSchema):
 
 class RlsRuleSchema(PermissiveSchema):
     dataset = fields.Integer()
-    clause = fields.String(required=True)  # todo other options?
+    clause = fields.String(required=True)
+
+    @validates("clause")
+    def validate_clause(self, clause: str) -> None:
+        """Validate that the RLS clause is safe SQL."""
+        try:
+            validate_rls_clause(clause, "base")
+        except QueryClauseValidationException as ex:
+            raise ValidationError(str(ex)) from ex
 
 
 class GuestTokenCreateSchema(PermissiveSchema):
@@ -185,7 +197,6 @@ class SecurityRestApi(BaseSupersetApi):
                     )
             # TODO: Add generic validation:
             # make sure username doesn't reference an existing user
-            # check rls rules for validity?
             token = self.appbuilder.sm.create_guest_access_token(
                 body["user"], body["resources"], body["rls"]
             )
