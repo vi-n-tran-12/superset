@@ -37,7 +37,7 @@ from flask_compress import Compress
 from flask_session import Session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from superset.constants import CHANGE_ME_SECRET_KEY
+from superset.constants import CHANGE_ME_GUEST_TOKEN_JWT_SECRET, CHANGE_ME_SECRET_KEY
 from superset.databases.utils import make_url_safe
 from superset.extensions import (
     _event_logger,
@@ -654,6 +654,53 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
             logger.error("Refusing to start due to insecure SECRET_KEY")
             sys.exit(1)
 
+    def check_guest_token_jwt_secret(self) -> None:
+        """
+        Refuse to start if embedded dashboards are enabled and
+        ``GUEST_TOKEN_JWT_SECRET`` is still set to the hardcoded default.
+
+        The guest token is signed with this secret, so a deployment that
+        leaves the default value unchanged allows anyone with knowledge of
+        the default (which is in public source code) to forge guest tokens
+        and bypass authentication for embedded dashboards.
+        """
+
+        def log_default_guest_token_secret_warning() -> None:
+            top_banner = 80 * "-" + "\n" + 36 * " " + "WARNING\n" + 80 * "-"
+            bottom_banner = 80 * "-" + "\n" + 80 * "-"
+            logger.warning(top_banner)
+            logger.warning(
+                "A default GUEST_TOKEN_JWT_SECRET was detected while the "
+                "EMBEDDED_SUPERSET feature flag is enabled. Please override "
+                "it in superset_config.py with a strong random value, "
+                "ex: openssl rand -base64 42"
+            )
+            logger.warning(bottom_banner)
+
+        feature_flags = {
+            **self.config.get("DEFAULT_FEATURE_FLAGS", {}),
+            **self.config.get("FEATURE_FLAGS", {}),
+        }
+        if not feature_flags.get("EMBEDDED_SUPERSET", False):
+            return
+
+        guest_token_secret = self.config.get("GUEST_TOKEN_JWT_SECRET")
+        if guest_token_secret != CHANGE_ME_GUEST_TOKEN_JWT_SECRET:
+            return
+
+        if (
+            self.superset_app.debug
+            or self.superset_app.config.get("TESTING")
+            or is_test()
+        ):
+            logger.warning("Debug mode identified with default GUEST_TOKEN_JWT_SECRET")
+            log_default_guest_token_secret_warning()
+            return
+
+        log_default_guest_token_secret_warning()
+        logger.error("Refusing to start due to insecure GUEST_TOKEN_JWT_SECRET")
+        sys.exit(1)
+
     def configure_session(self) -> None:
         if self.config["SESSION_SERVER_SIDE"]:
             Session(self.superset_app)
@@ -732,6 +779,7 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
         """
         self.pre_init()
         self.check_secret_key()
+        self.check_guest_token_jwt_secret()
         self.configure_session()
         # Configuration of logging must be done first to apply the formatter properly
         self.configure_logging()

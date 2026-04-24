@@ -18,9 +18,11 @@
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy.exc import OperationalError
 
 from superset.app import AppRootMiddleware, create_app, SupersetApp
+from superset.constants import CHANGE_ME_GUEST_TOKEN_JWT_SECRET
 from superset.initialization import SupersetAppInitializer
 
 
@@ -257,3 +259,96 @@ class TestCreateAppRoot:
 
         assert isinstance(app.wsgi_app, AppRootMiddleware)
         assert app.wsgi_app.app_root == "/from-param"
+
+
+def _make_initializer_for_guest_token(
+    *,
+    embedded_enabled: bool,
+    guest_secret: str,
+    debug: bool = False,
+    testing: bool = False,
+) -> SupersetAppInitializer:
+    mock_app = MagicMock()
+    mock_app.debug = debug
+    mock_app.config = {
+        "TESTING": testing,
+        "GUEST_TOKEN_JWT_SECRET": guest_secret,
+        "DEFAULT_FEATURE_FLAGS": {"EMBEDDED_SUPERSET": False},
+        "FEATURE_FLAGS": {"EMBEDDED_SUPERSET": embedded_enabled},
+    }
+    return SupersetAppInitializer(mock_app)
+
+
+class TestCheckGuestTokenJwtSecret:
+    """Tests for the startup validation of GUEST_TOKEN_JWT_SECRET."""
+
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_refuses_to_start_when_embedded_enabled_and_default_secret(
+        self, mock_is_test
+    ):
+        """
+        When EMBEDDED_SUPERSET is enabled and the guest token secret is still
+        the hardcoded default, the app must refuse to start.
+        """
+        initializer = _make_initializer_for_guest_token(
+            embedded_enabled=True,
+            guest_secret=CHANGE_ME_GUEST_TOKEN_JWT_SECRET,
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            initializer.check_guest_token_jwt_secret()
+
+        assert exc_info.value.code == 1
+
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_allows_startup_when_embedded_disabled(self, mock_is_test):
+        """
+        When EMBEDDED_SUPERSET is disabled, the default guest token secret
+        should not block startup (guest tokens are not used).
+        """
+        initializer = _make_initializer_for_guest_token(
+            embedded_enabled=False,
+            guest_secret=CHANGE_ME_GUEST_TOKEN_JWT_SECRET,
+        )
+
+        initializer.check_guest_token_jwt_secret()
+
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_allows_startup_when_secret_overridden(self, mock_is_test):
+        """A non-default guest token secret should pass validation."""
+        initializer = _make_initializer_for_guest_token(
+            embedded_enabled=True,
+            guest_secret="a-strong-random-secret",  # noqa: S106
+        )
+
+        initializer.check_guest_token_jwt_secret()
+
+    @patch("superset.initialization.logger")
+    @patch("superset.initialization.is_test", return_value=True)
+    def test_only_warns_in_test_mode(self, mock_is_test, mock_logger):
+        """
+        In test mode the startup check should log a warning but not exit,
+        mirroring the behavior of ``check_secret_key``.
+        """
+        initializer = _make_initializer_for_guest_token(
+            embedded_enabled=True,
+            guest_secret=CHANGE_ME_GUEST_TOKEN_JWT_SECRET,
+        )
+
+        initializer.check_guest_token_jwt_secret()
+
+        assert mock_logger.warning.called
+
+    @patch("superset.initialization.logger")
+    @patch("superset.initialization.is_test", return_value=False)
+    def test_only_warns_in_debug_mode(self, mock_is_test, mock_logger):
+        """In debug mode the startup check should log a warning but not exit."""
+        initializer = _make_initializer_for_guest_token(
+            embedded_enabled=True,
+            guest_secret=CHANGE_ME_GUEST_TOKEN_JWT_SECRET,
+            debug=True,
+        )
+
+        initializer.check_guest_token_jwt_secret()
+
+        assert mock_logger.warning.called
